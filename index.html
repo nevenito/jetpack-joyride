@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Jetpack Joyride</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { 
+            width: 100%; 
+            height: 100%; 
+            overflow: hidden;
+            background: #0a0a0f;
+            touch-action: none;
+        }
+        canvas { 
+            display: block; 
+            width: 100%; 
+            height: 100%;
+        }
+        #startScreen, #gameOverScreen {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(10, 10, 15, 0.95);
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            z-index: 10;
+        }
+        #startScreen h1, #gameOverScreen h1 {
+            font-size: 3em;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px #4af;
+        }
+        #startScreen p, #gameOverScreen p {
+            font-size: 1.5em;
+            opacity: 0.8;
+        }
+        .hidden { display: none !important; }
+        #finalScore { font-size: 2em; margin: 20px 0; color: #ffd700; }
+    </style>
+</head>
+<body>
+    <canvas id="game"></canvas>
+    
+    <div id="startScreen">
+        <h1>🚀 Jetpack Joyride</h1>
+        <p>Tap & hold to fly!</p>
+        <p style="margin-top: 30px; font-size: 1em; opacity: 0.6;">Avoid red obstacles, collect gold coins</p>
+    </div>
+    
+    <div id="gameOverScreen" class="hidden">
+        <h1>💥 Game Over</h1>
+        <div id="finalScore">Score: 0</div>
+        <p>Tap to restart</p>
+    </div>
+
+    <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const startScreen = document.getElementById('startScreen');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const finalScoreEl = document.getElementById('finalScore');
+
+    // Game settings
+    let W, H;
+    const GRAVITY = 2000;
+    const THRUST = -1800;
+    const MAX_SPEED = 800;
+
+    // Game state
+    let gameState = 'start'; // start, playing, gameover
+    let player, obstacles, coins, particles;
+    let score, distance, gameSpeed;
+    let isThrusting = false;
+    let lastObstacle = 0;
+    let lastCoin = 0;
+
+    function resize() {
+        W = canvas.width = window.innerWidth * window.devicePixelRatio;
+        H = canvas.height = window.innerHeight * window.devicePixelRatio;
+        ctx.scale(1, 1);
+    }
+
+    function init() {
+        player = { x: W * 0.15, y: H * 0.5, vy: 0, w: 40, h: 60 };
+        obstacles = [];
+        coins = [];
+        particles = [];
+        score = 0;
+        distance = 0;
+        gameSpeed = 400;
+        lastObstacle = 0;
+        lastCoin = 0;
+    }
+
+    function spawnObstacle() {
+        const height = 100 + Math.random() * 200;
+        const y = 50 + Math.random() * (H - 100 - height);
+        obstacles.push({
+            x: W + 50,
+            y: y,
+            w: 30,
+            h: height,
+            type: Math.random() > 0.7 ? 'laser' : 'zapper'
+        });
+    }
+
+    function spawnCoin() {
+        coins.push({
+            x: W + 30,
+            y: 50 + Math.random() * (H - 100),
+            r: 15,
+            rotation: 0
+        });
+    }
+
+    function spawnParticle(x, y, color) {
+        for (let i = 0; i < 5; i++) {
+            particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 300,
+                vy: (Math.random() - 0.5) * 300,
+                life: 1,
+                color
+            });
+        }
+    }
+
+    function update(dt) {
+        if (gameState !== 'playing') return;
+
+        // Player physics
+        if (isThrusting) {
+            player.vy += THRUST * dt;
+            // Spawn thrust particles
+            if (Math.random() > 0.5) {
+                particles.push({
+                    x: player.x - 20,
+                    y: player.y + player.h/2 + Math.random() * 20,
+                    vx: -200 - Math.random() * 100,
+                    vy: (Math.random() - 0.5) * 100,
+                    life: 0.5,
+                    color: `hsl(${30 + Math.random() * 20}, 100%, 50%)`
+                });
+            }
+        } else {
+            player.vy += GRAVITY * dt;
+        }
+        player.vy = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, player.vy));
+        player.y += player.vy * dt;
+
+        // Bounds
+        if (player.y < 30) { player.y = 30; player.vy = 0; }
+        if (player.y > H - 30 - player.h) { player.y = H - 30 - player.h; player.vy = 0; }
+
+        // Distance & speed
+        distance += gameSpeed * dt;
+        score = Math.floor(distance / 10);
+        gameSpeed = 400 + distance / 200;
+
+        // Spawn obstacles
+        if (distance - lastObstacle > 300 + Math.random() * 200) {
+            spawnObstacle();
+            lastObstacle = distance;
+        }
+
+        // Spawn coins
+        if (distance - lastCoin > 100 + Math.random() * 150) {
+            spawnCoin();
+            lastCoin = distance;
+        }
+
+        // Update obstacles
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            const o = obstacles[i];
+            o.x -= gameSpeed * dt;
+            if (o.x < -100) {
+                obstacles.splice(i, 1);
+                continue;
+            }
+            // Collision
+            if (player.x + player.w > o.x && player.x < o.x + o.w &&
+                player.y + player.h > o.y && player.y < o.y + o.h) {
+                gameOver();
+                return;
+            }
+        }
+
+        // Update coins
+        for (let i = coins.length - 1; i >= 0; i--) {
+            const c = coins[i];
+            c.x -= gameSpeed * dt;
+            c.rotation += dt * 5;
+            if (c.x < -50) {
+                coins.splice(i, 1);
+                continue;
+            }
+            // Collect
+            const dx = player.x + player.w/2 - c.x;
+            const dy = player.y + player.h/2 - c.y;
+            if (Math.sqrt(dx*dx + dy*dy) < c.r + 30) {
+                score += 50;
+                spawnParticle(c.x, c.y, '#ffd700');
+                coins.splice(i, 1);
+            }
+        }
+
+        // Update particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.life -= dt * 2;
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+    }
+
+    function draw() {
+        // Background
+        ctx.fillStyle = '#0a0a0f';
+        ctx.fillRect(0, 0, W, H);
+
+        // Ground & ceiling
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(0, 0, W, 30);
+        ctx.fillRect(0, H - 30, W, 30);
+
+        // Particles
+        particles.forEach(p => {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        // Obstacles
+        obstacles.forEach(o => {
+            if (o.type === 'laser') {
+                ctx.fillStyle = '#ff3366';
+                ctx.shadowColor = '#ff3366';
+                ctx.shadowBlur = 20;
+            } else {
+                ctx.fillStyle = '#ff4444';
+                ctx.shadowColor = '#ff4444';
+                ctx.shadowBlur = 10;
+            }
+            ctx.fillRect(o.x, o.y, o.w, o.h);
+            ctx.shadowBlur = 0;
+        });
+
+        // Coins
+        coins.forEach(c => {
+            ctx.save();
+            ctx.translate(c.x, c.y);
+            ctx.rotate(c.rotation);
+            ctx.fillStyle = '#ffd700';
+            ctx.shadowColor = '#ffd700';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.arc(0, 0, c.r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.restore();
+        });
+
+        // Player
+        ctx.fillStyle = '#4af';
+        ctx.shadowColor = '#4af';
+        ctx.shadowBlur = isThrusting ? 30 : 10;
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+        
+        // Jetpack flame
+        if (isThrusting) {
+            ctx.fillStyle = '#ff6600';
+            ctx.shadowColor = '#ff6600';
+            ctx.shadowBlur = 20;
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y + player.h);
+            ctx.lineTo(player.x + player.w, player.y + player.h);
+            ctx.lineTo(player.x + player.w/2, player.y + player.h + 30 + Math.random() * 20);
+            ctx.fill();
+        }
+        ctx.shadowBlur = 0;
+
+        // Score
+        ctx.fillStyle = 'white';
+        ctx.font = `bold ${Math.min(48, W/20)}px -apple-system, sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.fillText(`Score: ${score}`, 40, 80);
+    }
+
+    function gameOver() {
+        gameState = 'gameover';
+        finalScoreEl.textContent = `Score: ${score}`;
+        gameOverScreen.classList.remove('hidden');
+        spawnParticle(player.x, player.y, '#4af');
+    }
+
+    function startGame() {
+        init();
+        gameState = 'playing';
+        startScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+    }
+
+    // Input handling
+    function handleStart(e) {
+        e.preventDefault();
+        if (gameState === 'start' || gameState === 'gameover') {
+            startGame();
+        }
+        isThrusting = true;
+    }
+
+    function handleEnd(e) {
+        e.preventDefault();
+        isThrusting = false;
+    }
+
+    canvas.addEventListener('touchstart', handleStart, { passive: false });
+    canvas.addEventListener('touchend', handleEnd, { passive: false });
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mouseup', handleEnd);
+    startScreen.addEventListener('touchstart', handleStart, { passive: false });
+    startScreen.addEventListener('click', handleStart);
+    gameOverScreen.addEventListener('touchstart', handleStart, { passive: false });
+    gameOverScreen.addEventListener('click', handleStart);
+
+    // Game loop
+    let lastTime = 0;
+    function gameLoop(time) {
+        const dt = Math.min((time - lastTime) / 1000, 0.1);
+        lastTime = time;
+        
+        update(dt);
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // Init
+    window.addEventListener('resize', resize);
+    resize();
+    init();
+    requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
